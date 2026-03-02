@@ -1,0 +1,305 @@
+// ID вашей Google Таблицы
+const SHEET_ID = '1276H-hIOomzrNFCVmtstxfnaILSXXcmyTEOKvpni1F0';
+
+function doPost(e) {
+  try {
+    if (!e || !e.parameter) {
+      throw new Error('Нет данных в запросе');
+    }
+    
+    const params = e.parameter;
+    
+    // Открываем таблицу
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    
+    // Парсим данные гимнасток
+    const gymnasts = JSON.parse(params.gymnasts || '[]');
+    
+    // Общая информация
+    const timestamp = new Date();
+    const programType = params.program_type || '';
+    const programSubtype = params.program_subtype || '';
+    const teamName = params.team_name || '';
+    const category = params.category || '';
+    const city = params.city || '';
+    const organization = params.organization || '';
+    const coaches = params.coaches || '';
+    
+    const lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+    
+    try {
+      gymnasts.forEach(gymnast => {
+        const sheetName = getSheetName(programType, programSubtype, category, gymnast);
+        
+        let sheet = ss.getSheetByName(sheetName);
+        if (!sheet) {
+          sheet = createSheet(ss, sheetName, programType);
+        }
+        
+        // ПРОСТАЯ ПРОВЕРКА
+        const lastRow = sheet.getLastRow();
+        Logger.log('=== ОТЛАДКА ===');
+        Logger.log('Имя листа: ' + sheetName);
+        Logger.log('lastRow: ' + lastRow);
+        
+        // Если lastRow = 1 (только заголовок), то номер = 1
+        // Если lastRow = 2 (заголовок + 1 запись), то номер = 2 для следующей
+        const nextNumber = lastRow;
+        
+        Logger.log('nextNumber: ' + nextNumber);
+        
+        let rowData;
+        
+        if (programType === 'Индивидуальная программа') {
+          rowData = [
+            nextNumber,
+            gymnast.fio || '',
+            gymnast.birth_year || '',
+            city,
+            coaches,
+            organization,
+            gymnast.division || ''
+          ];
+        } 
+        else if (programType === 'Групповое упражнение') {
+          rowData = [
+            nextNumber,
+            teamName,
+            gymnast.fio || '',
+            gymnast.birth_year || '',
+            gymnast.rank || '',
+            city,
+            coaches,
+            organization,
+            category
+          ];
+        }
+        else if (programType === 'Двойки и тройки') {
+          rowData = [
+            nextNumber,
+            teamName,
+            gymnast.fio || '',
+            gymnast.birth_year || '',
+            gymnast.rank || '',
+            city,
+            coaches,
+            organization,
+            category
+          ];
+        }
+        else if (programType === 'ОФП') {
+          rowData = [
+            nextNumber,
+            gymnast.fio || '',
+            gymnast.birth_year || '',
+            city,
+            coaches,
+            organization,
+            category
+          ];
+        }
+        
+        Logger.log('=== ОТЛАДКА ===');
+        Logger.log('Имя листа: ' + sheetName);
+        Logger.log('lastRow до записи: ' + sheet.getLastRow());
+        Logger.log('Номер который поставим: ' + nextNumber);
+      
+        sheet.appendRow(rowData);
+      });
+    } finally {
+      lock.releaseLock();
+    }
+    
+    return ContentService
+      .createTextOutput(JSON.stringify({
+        success: true,
+        message: `Добавлено ${gymnasts.length} гимнасток`,
+        count: gymnasts.length
+      }))
+      .setMimeType(ContentService.MimeType.JSON);
+      
+  } catch (error) {
+    return ContentService
+      .createTextOutput(JSON.stringify({
+        success: false,
+        message: error.toString()
+      }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function getSheetName(programType, programSubtype, category, gymnast) {
+  if (programType === 'Индивидуальная программа') {
+    return gymnast.division || 'Индивидуальные прочие';
+  }
+  
+  if (programType === 'Групповое упражнение') {
+    return 'Групповые упражнения';
+  }
+  
+  if (programType === 'Двойки и тройки') {
+    if (programSubtype === 'двойки') {
+      return 'Двойки';
+    } else if (programSubtype === 'тройки') {
+      return 'Тройки';
+    }
+    return 'Двойки и тройки';
+  }
+  
+  if (programType === 'ОФП') {
+    if (category === '1 год обучения') {
+      return 'ОФП 1 год';
+    } else if (category === '2-3 год обучения') {
+      return 'ОФП 2-3 год';
+    }
+    return 'ОФП';
+  }
+  
+  return 'Прочие';
+}
+
+function createSheet(ss, sheetName, programType) {
+  let sheet = ss.getSheetByName(sheetName);
+  if (sheet) {
+    return sheet;
+  }
+  
+  sheet = ss.insertSheet(sheetName);
+  
+  let actualProgramType = programType;
+  if (!actualProgramType) {
+    if (sheetName.includes('дивизион')) {
+      actualProgramType = 'Индивидуальная программа';
+    } else if (sheetName === 'Групповые упражнения') {
+      actualProgramType = 'Групповое упражнение';
+    } else if (sheetName === 'Двойки' || sheetName === 'Тройки') {
+      actualProgramType = 'Двойки и тройки';
+    } else if (sheetName.startsWith('ОФП')) {
+      actualProgramType = 'ОФП';
+    } else {
+      actualProgramType = 'Индивидуальная программа';
+    }
+  }
+  
+  let headers;
+  
+  if (actualProgramType === 'Индивидуальная программа') {
+    headers = [
+      '№',
+      'ФИО гимнастки',
+      'Год рождения',
+      'Город',
+      'Тренеры',
+      'Организация',
+      'Дивизион'
+    ];
+  } 
+  else if (actualProgramType === 'Групповое упражнение') {
+    headers = [
+      '№',
+      'Название команды',
+      'ФИО гимнастки',
+      'Год рождения',
+      'Разряд',
+      'Город',
+      'Тренеры',
+      'Организация',
+      'Категория'
+    ];
+  }
+  else if (actualProgramType === 'Двойки и тройки') {
+    headers = [
+      '№',
+      'Название команды',
+      'ФИО гимнастки',
+      'Год рождения',
+      'Разряд',
+      'Город',
+      'Тренеры',
+      'Организация',
+      'Категория'
+    ];
+  }
+  else if (actualProgramType === 'ОФП') {
+    headers = [
+      '№',
+      'ФИО гимнастки',
+      'Год рождения',
+      'Город',
+      'Тренеры',
+      'Организация',
+      'Категория'
+    ];
+  } else {
+    headers = [
+      '№',
+      'ФИО гимнастки',
+      'Год рождения',
+      'Город',
+      'Тренеры',
+      'Организация',
+      'Дивизион'
+    ];
+  }
+  
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+  sheet.setFrozenRows(1);
+  
+  return sheet;
+}
+
+function createAllSheets() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  
+  const divisions = [
+    '1 дивизион 2020 и младше', '1 дивизион 2019', '1 дивизион 2018',
+    '1 дивизион 2017', '1 дивизион 2016', '1 дивизион 2015',
+    '1 дивизион 2014', '1 дивизион 2013', '1 дивизион 2012',
+    '1 дивизион 2011 и старше',
+    '2 дивизион 2020 и младше', '2 дивизион 2019', '2 дивизион 2018',
+    '2 дивизион 2017', '2 дивизион 2016', '2 дивизион 2015',
+    '2 дивизион 2014', '2 дивизион 2013', '2 дивизион 2012',
+    '2 дивизион 2011 и старше',
+    '3 дивизион 2020 и младше', '3 дивизион 2019', '3 дивизион 2018',
+    '3 дивизион 2017', '3 дивизион 2016', '3 дивизион 2015',
+    '3 дивизион 2014', '3 дивизион 2013', '3 дивизион 2012',
+    '3 дивизион 2011 и старше',
+    'Групповые упражнения',
+    'Двойки',
+    'Тройки',
+    'ОФП 1 год',
+    'ОФП 2-3 год'
+  ];
+  
+  divisions.forEach(name => {
+    if (!ss.getSheetByName(name)) {
+      ss.insertSheet(name);
+      // Добавляем заголовки
+      const sheet = ss.getSheetByName(name);
+      if (name.includes('Групповые') || name.includes('Двойки') || name.includes('Тройки')) {
+        sheet.getRange('A1:I1').setValues([[
+          '№', 'Название команды', 'ФИО гимнастки', 'Год рождения', 'Разряд', 'Город', 'Тренеры', 'Организация', 'Категория'
+        ]]);
+      } else if (name.includes('ОФП')) {
+        sheet.getRange('A1:G1').setValues([[
+          '№', 'ФИО гимнастки', 'Год рождения', 'Город', 'Тренеры', 'Организация', 'Категория'
+        ]]);
+      } else {
+        sheet.getRange('A1:G1').setValues([[
+          '№', 'ФИО гимнастки', 'Год рождения', 'Город', 'Тренеры', 'Организация', 'Дивизион'
+        ]]);
+      }
+      sheet.getRange('A1:I1').setFontWeight('bold');
+    }
+  });
+  
+  Logger.log('Все листы созданы!');
+}
+
+function doGet() {
+  return ContentService
+    .createTextOutput('Сервер работает. Используйте POST для отправки.')
+    .setMimeType(ContentService.MimeType.TEXT);
+}
